@@ -1,7 +1,7 @@
 # pitch_predictor
 ## Deep Learning Pitch Prediction Model 
 
-![](southparkpitch.gif)
+![](southparkpitch (1).gif)
 
 Did some work while studying in my Deep Learning class. We were learning about Artificial Neural Networks,
 and I was looking up some practical applications that I could easily implement. 
