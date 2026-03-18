@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Environment
+.env
+backend/.env
+
+# Model artifacts (large files)
+backend/model/artifacts/*.pkl
+
+# Node
+node_modules/
+frontend/dist/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store

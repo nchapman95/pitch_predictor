@@ -1,0 +1,204 @@
+.game-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+/* Teams */
+.teams-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.team {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+}
+
+.team-right {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.team-name {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.team-role {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.predicted-winner .team-name {
+  color: var(--green);
+}
+
+.vs-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 0 12px;
+  flex-shrink: 0;
+}
+
+.vs {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.game-time {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Prediction */
+.prediction-section {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.prediction-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.pred-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+}
+
+.confidence-badge {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.model-label {
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: auto;
+}
+
+.prob-bar-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.prob-label {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  width: 72px;
+}
+
+.prob-label:last-child {
+  text-align: right;
+}
+
+.prob-bar {
+  flex: 1;
+  height: 8px;
+  background: var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+}
+
+.prob-away {
+  background: var(--blue);
+  border-radius: 4px 0 0 4px;
+}
+
+.prob-home {
+  background: var(--green);
+  border-radius: 0 4px 4px 0;
+}
+
+.predicted-winner-text {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Odds table */
+.odds-section {
+  padding: 12px 20px 16px;
+}
+
+.odds-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.odds-table th {
+  text-align: left;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 4px 0 8px;
+}
+
+.odds-table th:not(:first-child),
+.odds-table td:not(:first-child) {
+  text-align: right;
+}
+
+.odds-table tr + tr td {
+  border-top: 1px solid #21262d;
+}
+
+.odds-table td {
+  padding: 6px 0;
+}
+
+.book-name {
+  color: var(--muted);
+}
+
+.odds-cell {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.fav { color: var(--red); }
+.dog { color: var(--green); }
+
+.best-row {
+  border-top: 2px solid var(--border) !important;
+}
+.best-row td {
+  font-weight: 600;
+  color: var(--yellow);
+  border-top: 2px solid var(--border) !important;
+}
+.best-row .odds-cell.fav { color: #ff9999; }
+.best-row .odds-cell.dog { color: #5adb84; }
+
+.no-odds {
+  padding: 12px 20px 16px;
+  color: var(--muted);
+  font-size: 13px;
+}
