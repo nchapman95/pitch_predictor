@@ -6,6 +6,30 @@ const CONFIDENCE_COLOR = {
   high: '#2ea043',
 }
 
+function americanToImplied(odds) {
+  if (odds == null) return null
+  if (odds < 0) return (-odds) / (-odds + 100)
+  return 100 / (odds + 100)
+}
+
+function getValueAlerts(homeTeam, awayTeam, bestOdds, prediction) {
+  if (!bestOdds || !prediction) return []
+  const alerts = []
+  const teams = [
+    { name: homeTeam, modelProb: prediction.home_win_prob, odds: bestOdds[homeTeam] },
+    { name: awayTeam, modelProb: prediction.away_win_prob, odds: bestOdds[awayTeam] },
+  ]
+  for (const { name, modelProb, odds } of teams) {
+    const implied = americanToImplied(odds)
+    if (implied == null) continue
+    const edge = modelProb - implied
+    if (edge >= 0.05) {
+      alerts.push({ team: name, modelProb, implied, edge })
+    }
+  }
+  return alerts
+}
+
 function formatAmericanOdds(n) {
   if (n == null) return '—'
   return n > 0 ? `+${n}` : `${n}`
@@ -48,6 +72,7 @@ export default function GameCard({ game }) {
   const bookmakers = Object.keys(odds || {})
   const winner = prediction?.predicted_winner
   const confidence = prediction?.confidence
+  const valueAlerts = getValueAlerts(home_team, away_team, best_odds, prediction)
 
   return (
     <div className="game-card">
@@ -90,6 +115,22 @@ export default function GameCard({ game }) {
             Predicted winner:{' '}
             <strong style={{ color: CONFIDENCE_COLOR[confidence] }}>{winner}</strong>
           </p>
+        </div>
+      )}
+
+      {/* Value alerts */}
+      {valueAlerts.length > 0 && (
+        <div className="value-alerts">
+          {valueAlerts.map(({ team, modelProb, implied, edge }) => (
+            <div key={team} className="value-alert">
+              <span className="value-icon">★</span>
+              <span>
+                <strong>{team.split(' ').at(-1)}</strong> model ({(modelProb * 100).toFixed(1)}%)
+                {' '}vs implied ({(implied * 100).toFixed(1)}%)
+                {' '}— <strong>+{(edge * 100).toFixed(1)}% edge</strong>
+              </span>
+            </div>
+          ))}
         </div>
       )}
 

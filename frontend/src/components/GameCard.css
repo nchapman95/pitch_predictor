@@ -140,6 +140,33 @@
   color: var(--muted);
 }
 
+/* Value alerts */
+.value-alerts {
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.value-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #1a2a1a;
+  border: 1px solid #2ea043;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #7ee787;
+}
+
+.value-icon {
+  color: #f0c040;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
 /* Odds table */
 .odds-section {
   padding: 12px 20px 16px;
