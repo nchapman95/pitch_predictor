@@ -14,8 +14,9 @@ class OddsClient:
         self.api_key = api_key
         self._cache: dict[str, Any] = {}
 
-    def get_raw(self) -> dict:
-        url = f"{ODDS_API_BASE}/sports/{SPORT}/odds"
+    def _fetch(self, date: Date = None) -> list:
+        today = datetime.now(timezone.utc).date()
+        target = date or today
         params = {
             "apiKey": self.api_key,
             "regions": "us",
@@ -23,18 +24,30 @@ class OddsClient:
             "oddsFormat": "american",
             "dateFormat": "iso",
         }
-        resp = requests.get(url, params=params, timeout=10)
-        resp.raise_for_status()
-        self._cache = {"data": resp.json(), "fetched_at": datetime.now(timezone.utc).isoformat()}
+
+        if target < today:
+            # Historical endpoint — snapshot at noon UTC on that date
+            url = f"{ODDS_API_BASE}/historical/sports/{SPORT}/odds"
+            params["date"] = f"{target}T12:00:00Z"
+            resp = requests.get(url, params=params, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            # Historical response wraps events under "data" key
+            return data.get("data", [])
+        else:
+            url = f"{ODDS_API_BASE}/sports/{SPORT}/odds"
+            resp = requests.get(url, params=params, timeout=10)
+            resp.raise_for_status()
+            return resp.json()
+
+    def get_raw(self) -> dict:
+        events = self._fetch()
+        self._cache = {"data": events, "fetched_at": datetime.now(timezone.utc).isoformat()}
         return self._cache
 
     def get_todays_mlb_games(self, date: Date = None) -> list[dict]:
-        raw = self.get_raw()
-        events = raw.get("data", raw) if isinstance(raw, dict) and "data" in raw else raw
-        if isinstance(events, dict):
-            events = events.get("data", [])
-
         target_date = date or datetime.now(timezone.utc).date()
+        events = self._fetch(date=date)
         games = []
 
         for event in events:
