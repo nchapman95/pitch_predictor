@@ -5,6 +5,8 @@ import './App.css'
 const REFRESH_INTERVAL = 60_000 // 60 seconds
 
 export default function App() {
+  const todayStr = new Date().toISOString().split('T')[0]
+  const [selectedDate, setSelectedDate] = useState(todayStr)
   const [games, setGames] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -13,7 +15,7 @@ export default function App() {
 
   const fetchGames = useCallback(async () => {
     try {
-      const res = await fetch('/api/games')
+      const res = await fetch(`/api/games?date=${selectedDate}`)
       if (!res.ok) throw new Error(`Server error: ${res.status}`)
       const data = await res.json()
       setGames(data.games || [])
@@ -27,12 +29,12 @@ export default function App() {
     }
   }, [])
 
-  // Initial fetch + interval refresh
+  // Refetch when date changes
   useEffect(() => {
     fetchGames()
     const interval = setInterval(fetchGames, REFRESH_INTERVAL)
     return () => clearInterval(interval)
-  }, [fetchGames])
+  }, [fetchGames, selectedDate])
 
   // Countdown timer
   useEffect(() => {
@@ -55,6 +57,12 @@ export default function App() {
             <p className="subtitle">{today}</p>
           </div>
           <div className="refresh-info">
+            <input
+              type="date"
+              className="date-picker"
+              value={selectedDate}
+              onChange={e => setSelectedDate(e.target.value)}
+            />
             {lastUpdated && (
               <span className="last-updated">
                 Updated {lastUpdated.toLocaleTimeString()}

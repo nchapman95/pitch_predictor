@@ -33,6 +33,17 @@
   flex-shrink: 0;
 }
 
+.date-picker {
+  background: var(--border);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.date-picker:focus { outline: none; border-color: var(--blue); }
+
 .last-updated { color: var(--muted); font-size: 12px; }
 
 .refresh-btn {

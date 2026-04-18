@@ -1,5 +1,5 @@
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date as Date
 from typing import Any
 
 ODDS_API_BASE = "https://api.the-odds-api.com/v4"
@@ -28,18 +28,18 @@ class OddsClient:
         self._cache = {"data": resp.json(), "fetched_at": datetime.now(timezone.utc).isoformat()}
         return self._cache
 
-    def get_todays_mlb_games(self) -> list[dict]:
+    def get_todays_mlb_games(self, date: Date = None) -> list[dict]:
         raw = self.get_raw()
         events = raw.get("data", raw) if isinstance(raw, dict) and "data" in raw else raw
         if isinstance(events, dict):
             events = events.get("data", [])
 
-        today = datetime.now(timezone.utc).date()
+        target_date = date or datetime.now(timezone.utc).date()
         games = []
 
         for event in events:
             game_time = datetime.fromisoformat(event["commence_time"].replace("Z", "+00:00"))
-            if game_time.date() != today:
+            if game_time.date() != target_date:
                 continue
 
             odds_by_book = _parse_bookmaker_odds(event.get("bookmakers", []))

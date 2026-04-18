@@ -1,5 +1,6 @@
 import os
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
+from datetime import date as Date
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from odds_client import OddsClient
@@ -26,10 +27,10 @@ def health():
 
 
 @app.get("/api/games")
-def get_games():
-    """Return today's MLB games with live odds and ML predictions."""
+def get_games(date: Date = Query(default=None)):
+    """Return MLB games with live odds and ML predictions for a given date (defaults to today)."""
     try:
-        games = odds_client.get_todays_mlb_games()
+        games = odds_client.get_todays_mlb_games(date=date)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Odds API error: {e}")
 
