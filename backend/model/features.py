@@ -76,7 +76,7 @@ def _get_season_pitching(year: int) -> pd.DataFrame:
     return df.set_index("team_abb")
 
 
-def build_team_stats(year: int | None = None) -> pd.DataFrame:
+def build_team_stats(year=None) -> pd.DataFrame:
     """Return a merged batting + pitching DataFrame indexed by team abbreviation."""
     if not PYBASEBALL_AVAILABLE:
         return pd.DataFrame()
@@ -86,7 +86,7 @@ def build_team_stats(year: int | None = None) -> pd.DataFrame:
     return batting.join(pitching, how="inner")
 
 
-def game_features(home_team: str, away_team: str, stats: pd.DataFrame) -> np.ndarray | None:
+def game_features(home_team: str, away_team: str, stats: pd.DataFrame):
     """
     Build a feature vector for a single matchup.
     Returns None if team data isn't available.
