@@ -2,16 +2,16 @@
 Train an MLB game winner prediction model.
 
 Usage:
-    python -m model.train [--years 2018 2019 2020 2021 2022 2023 2024]
+    python -m model.train [--years 2019 2020 2021 2022 2023 2024]
 
 Pipeline:
-1. Pull historical game logs via pybaseball for each season
-2. Pull team batting/pitching stats per season
-3. Build feature vectors for each game
-4. Train an XGBoost classifier (home win = 1)
-5. Save model + scaler to model/artifacts/
+1. For each season, fetch per-game batting logs for every team via BRef
+2. Compute rolling pre-game stats (last 15 games) for each team
+3. For each home game, match both teams' pre-game stats by date
+4. Train a GradientBoosting classifier (home win = 1)
+5. Save model to model/artifacts/
 
-Typical accuracy: ~57-60% (home field + team quality signals)
+Typical accuracy: ~57-60%
 """
 
 import argparse
@@ -19,7 +19,6 @@ import os
 import pickle
 import numpy as np
 import pandas as pd
-from datetime import datetime
 
 import pybaseball
 pybaseball.cache.enable()
@@ -29,74 +28,70 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import cross_val_score
 from sklearn.pipeline import Pipeline
 
-from features import build_team_stats, game_features, TEAM_NAME_TO_ABB
+from features import build_team_game_lookup, MIN_GAMES, feature_columns
 
 ARTIFACTS_DIR = os.path.join(os.path.dirname(__file__), "artifacts")
 MODEL_PATH = os.path.join(ARTIFACTS_DIR, "model.pkl")
 
-# Reverse map: FG team name -> abbreviation
-# pybaseball game logs use full city names; we map via standings/schedule
-FG_TEAM_TO_ABB = {v: v for v in TEAM_NAME_TO_ABB.values()}  # identity for abbrevs
+_TEAM_FEATS = ["rpg", "rapg", "obp", "slg", "bb_pct", "k_pct", "wpct"]
 
 
-def _get_game_logs(year: int) -> pd.DataFrame:
-    """Pull all game results for a season using pybaseball schedule_and_record."""
-    frames = []
-    for team_abb in list(set(TEAM_NAME_TO_ABB.values())):
-        try:
-            df = pybaseball.schedule_and_record(year, team_abb)
-            df["team_abb"] = team_abb
-            frames.append(df)
-        except Exception:
-            continue
-    if not frames:
-        return pd.DataFrame()
-    return pd.concat(frames, ignore_index=True)
-
-
-def build_training_data(years: list[int]) -> tuple[np.ndarray, np.ndarray]:
+def build_training_data(years: list) -> tuple:
     X_all, y_all = [], []
 
     for year in years:
         print(f"Processing {year}...")
-        stats = build_team_stats(year)
-        if stats.empty:
-            print(f"  No stats for {year}, skipping")
+        lookup = build_team_game_lookup(year)
+        if not lookup:
+            print(f"  No data for {year}, skipping")
             continue
 
-        logs = _get_game_logs(year)
-        if logs.empty:
-            continue
+        # Build date -> row index for each team for fast lookup
+        date_idx = {
+            abb: {pd.Timestamp(row["Date"]).date(): i
+                  for i, row in df.iterrows()}
+            for abb, df in lookup.items()
+        }
 
-        # Filter to home games only (avoid duplicates)
-        home_games = logs[logs["Home_Away"] == "Home"].copy()
+        games_added = 0
+        for home_abb, home_df in lookup.items():
+            home_games = home_df[home_df["Home"] == True]
 
-        for _, row in home_games.iterrows():
-            result = str(row.get("W/L", "")).strip().upper()
-            if result not in ("W", "L"):
-                continue
+            for _, row in home_games.iterrows():
+                away_abb = str(row.get("Opp", "")).strip()
+                if away_abb not in lookup:
+                    continue
 
-            home_team_abb = row["team_abb"]
-            opp_abb = str(row.get("Opp", "")).strip()
+                game_date = pd.Timestamp(row["Date"]).date()
+                h_idx = date_idx[home_abb].get(game_date)
+                a_idx = date_idx[away_abb].get(game_date)
+                if h_idx is None or a_idx is None:
+                    continue
 
-            # We need full team names to look up in stats
-            if home_team_abb not in stats.index or opp_abb not in stats.index:
-                continue
+                # Require minimum game history for both teams
+                if row["n_prior"] < MIN_GAMES:
+                    continue
+                a_row = lookup[away_abb].iloc[a_idx]
+                if a_row["n_prior"] < MIN_GAMES:
+                    continue
 
-            home_feats = stats.loc[home_team_abb].values.astype(float)
-            away_feats = stats.loc[opp_abb].values.astype(float)
-            feat_vec = np.concatenate([home_feats, away_feats, [1.0]])
+                home_feats = home_df.iloc[h_idx][_TEAM_FEATS].values.astype(float)
+                away_feats = lookup[away_abb].iloc[a_idx][_TEAM_FEATS].values.astype(float)
+                feat_vec = np.concatenate([home_feats, away_feats, [1.0]])
 
-            if np.any(np.isnan(feat_vec)):
-                continue
+                if np.any(np.isnan(feat_vec)):
+                    continue
 
-            X_all.append(feat_vec)
-            y_all.append(1 if result == "W" else 0)
+                X_all.append(feat_vec)
+                y_all.append(int(row["win"]))
+                games_added += 1
+
+        print(f"  {year}: added {games_added} games (total so far: {len(X_all)})")
 
     return np.array(X_all), np.array(y_all)
 
 
-def train(years: list[int]):
+def train(years: list):
     os.makedirs(ARTIFACTS_DIR, exist_ok=True)
 
     print("Building training data...")
@@ -119,7 +114,7 @@ def train(years: list[int]):
     ])
 
     scores = cross_val_score(pipeline, X, y, cv=5, scoring="accuracy")
-    print(f"CV Accuracy: {scores.mean():.3f} ± {scores.std():.3f}")
+    print(f"CV Accuracy: {scores.mean():.3f} +/- {scores.std():.3f}")
 
     pipeline.fit(X, y)
 
