@@ -20,6 +20,9 @@ import pickle
 import numpy as np
 import pandas as pd
 
+import mlflow
+import mlflow.sklearn
+
 import pybaseball
 pybaseball.cache.enable()
 
@@ -28,10 +31,11 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import cross_val_score
 from sklearn.pipeline import Pipeline
 
-from features import build_team_game_lookup, MIN_GAMES, feature_columns
+from features import build_team_game_lookup, MIN_GAMES, ROLLING_WINDOW, feature_columns
 
 ARTIFACTS_DIR = os.path.join(os.path.dirname(__file__), "artifacts")
 MODEL_PATH = os.path.join(ARTIFACTS_DIR, "model.pkl")
+MLFLOW_TRACKING_URI = os.path.join(os.path.dirname(__file__), "mlruns")
 
 _TEAM_FEATS = ["rpg", "rapg", "obp", "slg", "bb_pct", "k_pct", "wpct"]
 
@@ -91,45 +95,90 @@ def build_training_data(years: list) -> tuple:
     return np.array(X_all), np.array(y_all)
 
 
-def train(years: list):
+def train(years: list, n_estimators: int = 300, max_depth: int = 4,
+          learning_rate: float = 0.05, subsample: float = 0.8):
     os.makedirs(ARTIFACTS_DIR, exist_ok=True)
 
-    print("Building training data...")
-    X, y = build_training_data(years)
-    print(f"Dataset: {len(X)} games, home win rate: {y.mean():.3f}")
+    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+    mlflow.set_experiment("mlb-game-predictor")
 
-    if len(X) == 0:
-        print("No data collected. Make sure pybaseball can reach the internet.")
-        return
+    with mlflow.start_run():
+        # --- Parameters ---
+        params = {
+            "years": str(years),
+            "n_years": len(years),
+            "rolling_window": ROLLING_WINDOW,
+            "min_games": MIN_GAMES,
+            "n_estimators": n_estimators,
+            "max_depth": max_depth,
+            "learning_rate": learning_rate,
+            "subsample": subsample,
+        }
+        mlflow.log_params(params)
 
-    pipeline = Pipeline([
-        ("scaler", StandardScaler()),
-        ("model", GradientBoostingClassifier(
-            n_estimators=300,
-            max_depth=4,
-            learning_rate=0.05,
-            subsample=0.8,
-            random_state=42,
-        )),
-    ])
+        # --- Data ---
+        print("Building training data...")
+        X, y = build_training_data(years)
+        print(f"Dataset: {len(X)} games, home win rate: {y.mean():.3f}")
 
-    scores = cross_val_score(pipeline, X, y, cv=5, scoring="accuracy")
-    print(f"CV Accuracy: {scores.mean():.3f} +/- {scores.std():.3f}")
+        if len(X) == 0:
+            print("No data collected. Make sure pybaseball can reach the internet.")
+            return
 
-    pipeline.fit(X, y)
+        mlflow.log_metrics({
+            "n_games": len(X),
+            "home_win_rate": float(y.mean()),
+        })
 
-    with open(MODEL_PATH, "wb") as f:
-        pickle.dump(pipeline, f)
-    print(f"Model saved to {MODEL_PATH}")
+        # --- Model ---
+        pipeline = Pipeline([
+            ("scaler", StandardScaler()),
+            ("model", GradientBoostingClassifier(
+                n_estimators=n_estimators,
+                max_depth=max_depth,
+                learning_rate=learning_rate,
+                subsample=subsample,
+                random_state=42,
+            )),
+        ])
+
+        # --- Cross-validation ---
+        scores = cross_val_score(pipeline, X, y, cv=5, scoring="accuracy")
+        print(f"CV Accuracy: {scores.mean():.3f} +/- {scores.std():.3f}")
+        mlflow.log_metrics({
+            "cv_accuracy_mean": float(scores.mean()),
+            "cv_accuracy_std": float(scores.std()),
+            **{f"cv_fold_{i+1}": float(s) for i, s in enumerate(scores)},
+        })
+
+        # --- Fit & save ---
+        pipeline.fit(X, y)
+        train_acc = float(pipeline.score(X, y))
+        mlflow.log_metric("train_accuracy", train_acc)
+
+        mlflow.sklearn.log_model(pipeline, "model")
+
+        with open(MODEL_PATH, "wb") as f:
+            pickle.dump(pipeline, f)
+        mlflow.log_artifact(MODEL_PATH, "pickle")
+
+        print(f"Model saved to {MODEL_PATH}")
+        print(f"MLflow run: {mlflow.active_run().info.run_id}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--years",
-        nargs="+",
-        type=int,
-        default=[2019, 2020, 2021, 2022, 2023, 2024],
-    )
+    parser.add_argument("--years", nargs="+", type=int,
+                        default=[2019, 2020, 2021, 2022, 2023, 2024])
+    parser.add_argument("--n-estimators", type=int, default=300)
+    parser.add_argument("--max-depth", type=int, default=4)
+    parser.add_argument("--learning-rate", type=float, default=0.05)
+    parser.add_argument("--subsample", type=float, default=0.8)
     args = parser.parse_args()
-    train(args.years)
+    train(
+        years=args.years,
+        n_estimators=args.n_estimators,
+        max_depth=args.max_depth,
+        learning_rate=args.learning_rate,
+        subsample=args.subsample,
+    )
