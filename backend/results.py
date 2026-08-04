@@ -117,7 +117,7 @@ def resolve_pending(db):
     return resolved_count
 
 
-def resolve_range(db, start: str, end: str) -> int:
+def resolve_range(db, start: str, end: str, debug: bool = False) -> int:
     """
     Resolve all games (resolved or not) in a date range.
     Useful for fixing missed results or re-checking a specific month.
@@ -145,6 +145,9 @@ def resolve_range(db, start: str, end: str) -> int:
                 db.resolve_game(row["id"], match["winner"])
                 resolved_count += 1
                 day_resolved += 1
+            elif debug:
+                print(f"    NO MATCH for: {row['away_team']} @ {row['home_team']}")
+                print(f"    API returned: {[(f['away_team'], f['home_team']) for f in finals]}")
         print(f"  {date_str}  {day_resolved}/{len(rows)} resolved")
         if i < len(dates) - 1:
             time.sleep(0.2)
@@ -160,6 +163,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Resolve MLB game results from the MLB Stats API")
     parser.add_argument("--start", default=None, help="Start date YYYY-MM-DD (default: all pending)")
     parser.add_argument("--end",   default=None, help="End date YYYY-MM-DD (default: yesterday)")
+    parser.add_argument("--debug", action="store_true", help="Print unmatched games and API names")
     args = parser.parse_args()
 
     db.init_db()
@@ -167,7 +171,7 @@ if __name__ == "__main__":
     if args.start:
         end = args.end or (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
         print(f"Resolving {args.start} → {end} ...")
-        n = resolve_range(db, args.start, end)
+        n = resolve_range(db, args.start, end, debug=args.debug)
     else:
         print("Resolving all pending past games ...")
         n = resolve_pending(db)
