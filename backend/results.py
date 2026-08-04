@@ -49,7 +49,6 @@ _NAME_MAP = {
     "Texas Rangers": "Texas Rangers",
     "Toronto Blue Jays": "Toronto Blue Jays",
     "Washington Nationals": "Washington Nationals",
-    "Athletics": "Oakland Athletics",
 }
 
 
