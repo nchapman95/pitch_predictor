@@ -3,30 +3,10 @@ SQLite store for predictions, resolved results, and full odds snapshots.
 
 Schema
 ------
-predictions
-  id              TEXT PK   (odds API game id)
-  game_date       TEXT      (YYYY-MM-DD)
-  home_team       TEXT
-  away_team       TEXT
-  predicted_winner TEXT
-  home_win_prob   REAL
-  away_win_prob   REAL
-  is_value_pick   INTEGER   (1 if any team had >=5% edge over implied)
-  home_best_odds  INTEGER   (American, best available)
-  away_best_odds  INTEGER
-  odds_json       TEXT      (JSON: full per-book odds snapshot at prediction time)
-  model_used      TEXT
-  created_at      TEXT
-  actual_winner   TEXT      (filled after game finishes)
-  resolved        INTEGER   (0 = pending, 1 = resolved)
-
-odds_snapshots
-  id              INTEGER PK AUTOINCREMENT
-  game_id         TEXT      (FK -> predictions.id)
-  captured_at     TEXT      (ISO timestamp)
-  odds_json       TEXT      (JSON: per-book lines at this moment)
-
-  Allows tracking line movement by calling /api/games multiple times.
+predictions          — one row per game (game record + odds + resolved result)
+model_predictions    — one row per (game, model); stores each model's pick
+odds_snapshots       — one row per /api/games call; captures line movement
+backfill_log         — tracks which dates have been backfilled
 """
 
 import json
@@ -55,11 +35,23 @@ _PREDICTIONS_COLS = """
     resolved        INTEGER DEFAULT 0
 """
 
+_MODEL_PREDICTIONS_COLS = """
+    game_id         TEXT NOT NULL,
+    model_name      TEXT NOT NULL,
+    predicted_winner TEXT,
+    home_win_prob   REAL,
+    away_win_prob   REAL,
+    is_value_pick   INTEGER DEFAULT 0,
+    created_at      TEXT,
+    PRIMARY KEY (game_id, model_name)
+"""
+
 
 def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     with _conn() as cx:
         cx.execute(f"CREATE TABLE IF NOT EXISTS predictions ({_PREDICTIONS_COLS})")
+        cx.execute(f"CREATE TABLE IF NOT EXISTS model_predictions ({_MODEL_PREDICTIONS_COLS})")
         cx.execute("""
             CREATE TABLE IF NOT EXISTS odds_snapshots (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,7 +61,7 @@ def init_db():
             )
         """)
         cx.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_game ON odds_snapshots(game_id)")
-        # Migrate: add odds_json column if upgrading from older schema
+        cx.execute("CREATE INDEX IF NOT EXISTS idx_mp_game ON model_predictions(game_id)")
         _add_column_if_missing(cx, "predictions", "odds_json", "TEXT")
 
 
@@ -92,16 +84,16 @@ def _conn():
 
 def upsert_prediction(game: dict, prediction: dict, value_alerts: list):
     """
-    Insert prediction if not already stored (first time we see this game_id).
-    Always append a new odds snapshot so line movement is captured.
+    Insert game record + primary model prediction (first write wins).
+    Always appends an odds snapshot for line-movement tracking.
     """
-    best = game.get("best_odds", {})
-    odds = game.get("odds", {})
+    best      = game.get("best_odds", {})
+    odds      = game.get("odds", {})
     home_team = game["home_team"]
     away_team = game["away_team"]
-    is_value = int(any(a["team"] in (home_team, away_team) for a in value_alerts))
+    is_value  = int(any(a["team"] in (home_team, away_team) for a in value_alerts))
     game_date = game["commence_time"][:10]
-    now = datetime.now(timezone.utc).isoformat()
+    now       = datetime.now(timezone.utc).isoformat()
     odds_json = json.dumps(odds)
 
     with _conn() as cx:
@@ -124,14 +116,36 @@ def upsert_prediction(game: dict, prediction: dict, value_alerts: list):
             now,
         ))
 
-        # Always save an odds snapshot (captures line movement on repeated fetches)
         cx.execute("""
             INSERT INTO odds_snapshots (game_id, captured_at, odds_json)
             VALUES (?, ?, ?)
         """, (game["id"], now, odds_json))
 
 
-def get_unresolved(before_date: str) -> list[dict]:
+def upsert_model_prediction(game_id: str, model_name: str,
+                            prediction: dict, is_value: int):
+    """
+    Store one model's prediction for a game (first write wins per model).
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    with _conn() as cx:
+        cx.execute("""
+            INSERT INTO model_predictions
+              (game_id, model_name, predicted_winner,
+               home_win_prob, away_win_prob, is_value_pick, created_at)
+            VALUES (?,?,?,?,?,?,?)
+            ON CONFLICT(game_id, model_name) DO NOTHING
+        """, (
+            game_id, model_name,
+            prediction.get("predicted_winner"),
+            prediction.get("home_win_prob"),
+            prediction.get("away_win_prob"),
+            is_value,
+            now,
+        ))
+
+
+def get_unresolved(before_date: str) -> list:
     with _conn() as cx:
         rows = cx.execute("""
             SELECT * FROM predictions
@@ -147,8 +161,7 @@ def resolve_game(game_id: str, actual_winner: str):
         """, (actual_winner, game_id))
 
 
-def get_odds_history(game_id: str) -> list[dict]:
-    """Return all odds snapshots for a game, oldest first."""
+def get_odds_history(game_id: str) -> list:
     with _conn() as cx:
         rows = cx.execute("""
             SELECT captured_at, odds_json FROM odds_snapshots
@@ -158,55 +171,100 @@ def get_odds_history(game_id: str) -> list[dict]:
 
 
 def get_performance_stats() -> dict:
+    """
+    Returns per-model accuracy / ROI stats by joining model_predictions
+    with the resolved game records in predictions.
+    Falls back to the predictions table's own model_used column for data
+    written before model_predictions existed.
+    """
     with _conn() as cx:
-        rows = cx.execute("SELECT * FROM predictions WHERE resolved = 1").fetchall()
-    rows = [dict(r) for r in rows]
-    if not rows:
-        return {"resolved_games": 0}
+        # Per-model rows from model_predictions (preferred)
+        mp_rows = cx.execute("""
+            SELECT mp.game_id, mp.model_name,
+                   mp.predicted_winner, mp.home_win_prob, mp.away_win_prob,
+                   mp.is_value_pick,
+                   p.actual_winner, p.home_team, p.away_team,
+                   p.home_best_odds, p.away_best_odds
+            FROM model_predictions mp
+            JOIN predictions p ON mp.game_id = p.id
+            WHERE p.resolved = 1
+        """).fetchall()
 
+        # Legacy rows stored only in predictions (no model_predictions entry)
+        legacy_rows = cx.execute("""
+            SELECT p.id AS game_id, p.model_used AS model_name,
+                   p.predicted_winner, p.home_win_prob, p.away_win_prob,
+                   p.is_value_pick,
+                   p.actual_winner, p.home_team, p.away_team,
+                   p.home_best_odds, p.away_best_odds
+            FROM predictions p
+            WHERE p.resolved = 1
+              AND NOT EXISTS (
+                  SELECT 1 FROM model_predictions mp WHERE mp.game_id = p.id
+              )
+        """).fetchall()
+
+    all_rows = [dict(r) for r in mp_rows] + [dict(r) for r in legacy_rows]
+
+    if not all_rows:
+        return {"resolved_games": 0, "by_model": {}}
+
+    # Count unique resolved games
+    resolved_games = len({r["game_id"] for r in all_rows})
+
+    # Group by model
+    by_model_rows: dict[str, list] = {}
+    for r in all_rows:
+        by_model_rows.setdefault(r["model_name"] or "unknown", []).append(r)
+
+    by_model = {
+        model: _model_stats(rows)
+        for model, rows in by_model_rows.items()
+    }
+
+    return {
+        "resolved_games": resolved_games,
+        "by_model": by_model,
+    }
+
+
+def _model_stats(rows: list) -> dict:
     def stats(subset):
         if not subset:
             return {"games": 0}
         correct = sum(1 for r in subset if r["predicted_winner"] == r["actual_winner"])
         return {
-            "games": len(subset),
-            "correct": correct,
+            "games":    len(subset),
+            "correct":  correct,
             "accuracy": round(correct / len(subset), 4),
-            "roi": _calc_roi(subset),
+            "roi":      _calc_roi(subset),
         }
 
-    value_picks = [r for r in rows if r["is_value_pick"]]
+    value_picks = [r for r in rows if r.get("is_value_pick")]
     return {
-        "resolved_games": len(rows),
-        "overall": stats(rows),
+        "overall":     stats(rows),
         "value_picks": stats(value_picks),
-        "by_model": _group_by(rows, "model_used", stats),
         "calibration": _calibration(rows),
     }
 
 
-def _calc_roi(rows: list[dict]) -> float:
+def _calc_roi(rows: list) -> float:
     total_wagered = total_returned = 0
     for r in rows:
         winner = r["predicted_winner"]
-        odds = r["home_best_odds"] if winner == r["home_team"] else r["away_best_odds"]
+        odds   = r["home_best_odds"] if winner == r["home_team"] else r["away_best_odds"]
         if odds is None:
             continue
         total_wagered += 100
         if r["predicted_winner"] == r["actual_winner"]:
             payout = (100 / abs(odds) * 100) if odds < 0 else (odds / 100 * 100)
             total_returned += 100 + payout
-    return 0.0 if total_wagered == 0 else round((total_returned - total_wagered) / total_wagered, 4)
+    return 0.0 if total_wagered == 0 else round(
+        (total_returned - total_wagered) / total_wagered, 4
+    )
 
 
-def _group_by(rows, key, fn):
-    groups: dict[str, list] = {}
-    for r in rows:
-        groups.setdefault(r[key], []).append(r)
-    return {k: fn(v) for k, v in groups.items()}
-
-
-def _calibration(rows: list[dict]) -> list[dict]:
+def _calibration(rows: list) -> list:
     buckets: dict[str, list] = {}
     for r in rows:
         prob = r["home_win_prob"] if r["predicted_winner"] == r["home_team"] else r["away_win_prob"]
@@ -216,11 +274,11 @@ def _calibration(rows: list[dict]) -> list[dict]:
         buckets.setdefault(bucket, []).append(r)
     result = []
     for bucket in sorted(buckets):
-        subset = buckets[bucket]
+        subset  = buckets[bucket]
         correct = sum(1 for r in subset if r["predicted_winner"] == r["actual_winner"])
         result.append({
-            "bucket": bucket,
-            "games": len(subset),
+            "bucket":          bucket,
+            "games":           len(subset),
             "actual_win_rate": round(correct / len(subset), 4),
         })
     return result

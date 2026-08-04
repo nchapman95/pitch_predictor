@@ -74,10 +74,27 @@
   white-space: nowrap;
 }
 
-/* Prediction */
-.prediction-section {
-  padding: 12px 20px;
+/* Predictions (single or multi-model) */
+.predictions-section {
   border-bottom: 1px solid var(--border);
+}
+
+.predictions-section.multi-model {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.model-prediction {
+  padding: 12px 20px;
+}
+
+.predictions-section.multi-model .model-prediction:first-child {
+  border-right: 1px solid var(--border);
+}
+
+/* keep value alerts full-width inside each model block */
+.model-prediction .value-alerts {
+  margin-top: 6px;
 }
 
 .prediction-header {
@@ -150,15 +167,7 @@
   color: var(--muted);
 }
 
-/* Value alerts */
-.value-alerts {
-  padding: 10px 20px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
+/* Value alerts (now rendered inside each model block) */
 .value-alert {
   display: flex;
   align-items: center;

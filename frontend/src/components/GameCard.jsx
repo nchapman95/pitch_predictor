@@ -6,6 +6,11 @@ const CONFIDENCE_COLOR = {
   high: '#2ea043',
 }
 
+const MODEL_LABEL = {
+  v2: 'v2 · pitcher',
+  v1: 'v1 · rolling',
+}
+
 function americanToImplied(odds) {
   if (odds == null) return null
   if (odds < 0) return (-odds) / (-odds + 100)
@@ -55,6 +60,44 @@ function ProbBar({ homeProb, awayProb, homeTeam, awayTeam }) {
   )
 }
 
+function ModelPrediction({ modelKey, prediction, homeTeam, awayTeam, bestOdds }) {
+  const winner     = prediction?.predicted_winner
+  const confidence = prediction?.confidence
+  const alerts     = getValueAlerts(homeTeam, awayTeam, bestOdds, prediction)
+  const label      = MODEL_LABEL[modelKey] || prediction?.model_used || modelKey
+
+  return (
+    <div className="model-prediction">
+      <div className="prediction-header">
+        <span className="pred-label">{label}</span>
+        <span className="confidence-badge" style={{ color: CONFIDENCE_COLOR[confidence] }}>
+          {confidence} confidence
+        </span>
+      </div>
+      <ProbBar
+        homeProb={prediction.home_win_prob}
+        awayProb={prediction.away_win_prob}
+        homeTeam={homeTeam}
+        awayTeam={awayTeam}
+      />
+      <p className="predicted-winner-text">
+        Predicted winner:{' '}
+        <strong style={{ color: CONFIDENCE_COLOR[confidence] }}>{winner}</strong>
+      </p>
+      {alerts.map(({ team, modelProb, implied, edge }) => (
+        <div key={team} className="value-alert">
+          <span className="value-icon">★</span>
+          <span>
+            <strong>{team.split(' ').at(-1)}</strong>{' '}
+            model ({(modelProb * 100).toFixed(1)}%) vs implied ({(implied * 100).toFixed(1)}%)
+            {' '}— <strong>+{(edge * 100).toFixed(1)}% edge</strong>
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function OddsRow({ bookmaker, homeTeam, awayTeam, prices }) {
   const homeOdds = prices?.[homeTeam]
   const awayOdds = prices?.[awayTeam]
@@ -75,20 +118,20 @@ function PitcherBadge({ name }) {
 
 export default function GameCard({ game }) {
   const {
-    home_team, away_team, commence_time, odds, best_odds, prediction,
+    home_team, away_team, commence_time, odds, best_odds,
+    predictions,
     home_pitcher, away_pitcher,
   } = game
-  const bookmakers = Object.keys(odds || {})
-  const winner = prediction?.predicted_winner
-  const confidence = prediction?.confidence
-  const valueAlerts = getValueAlerts(home_team, away_team, best_odds, prediction)
+
+  const bookmakers  = Object.keys(odds || {})
   const hasPitchers = home_pitcher || away_pitcher
+  const modelKeys   = Object.keys(predictions || {})
 
   return (
     <div className="game-card">
       {/* Teams header */}
       <div className="teams-row">
-        <div className={`team ${winner === away_team ? 'predicted-winner' : ''}`}>
+        <div className="team">
           <span className="team-name">{away_team}</span>
           <span className="team-role">Away</span>
           {hasPitchers && <PitcherBadge name={away_pitcher} />}
@@ -97,51 +140,25 @@ export default function GameCard({ game }) {
           <span className="vs">@</span>
           <span className="game-time">{formatTime(commence_time)}</span>
         </div>
-        <div className={`team team-right ${winner === home_team ? 'predicted-winner' : ''}`}>
+        <div className="team team-right">
           <span className="team-name">{home_team}</span>
           <span className="team-role">Home</span>
           {hasPitchers && <PitcherBadge name={home_pitcher} />}
         </div>
       </div>
 
-      {/* ML Prediction */}
-      {prediction && (
-        <div className="prediction-section">
-          <div className="prediction-header">
-            <span className="pred-label">ML Prediction</span>
-            <span
-              className="confidence-badge"
-              style={{ color: CONFIDENCE_COLOR[confidence] }}
-            >
-              {confidence} confidence
-            </span>
-            <span className="model-label">{prediction.model_used}</span>
-          </div>
-          <ProbBar
-            homeProb={prediction.home_win_prob}
-            awayProb={prediction.away_win_prob}
-            homeTeam={home_team}
-            awayTeam={away_team}
-          />
-          <p className="predicted-winner-text">
-            Predicted winner:{' '}
-            <strong style={{ color: CONFIDENCE_COLOR[confidence] }}>{winner}</strong>
-          </p>
-        </div>
-      )}
-
-      {/* Value alerts */}
-      {valueAlerts.length > 0 && (
-        <div className="value-alerts">
-          {valueAlerts.map(({ team, modelProb, implied, edge }) => (
-            <div key={team} className="value-alert">
-              <span className="value-icon">★</span>
-              <span>
-                <strong>{team.split(' ').at(-1)}</strong> model ({(modelProb * 100).toFixed(1)}%)
-                {' '}vs implied ({(implied * 100).toFixed(1)}%)
-                {' '}— <strong>+{(edge * 100).toFixed(1)}% edge</strong>
-              </span>
-            </div>
+      {/* Per-model predictions */}
+      {modelKeys.length > 0 && (
+        <div className={`predictions-section ${modelKeys.length > 1 ? 'multi-model' : ''}`}>
+          {modelKeys.map(key => (
+            <ModelPrediction
+              key={key}
+              modelKey={key}
+              prediction={predictions[key]}
+              homeTeam={home_team}
+              awayTeam={away_team}
+              bestOdds={best_odds}
+            />
           ))}
         </div>
       )}

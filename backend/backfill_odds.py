@@ -123,13 +123,16 @@ def fetch_historical(date_str: str, api_key: str) -> tuple[list, int, int]:
     return events, credits_used, credits_remaining
 
 
-def save_events(events: list, date_str: str, api_key_hint: str):
-    """Parse events and save odds + baseline predictions to the DB."""
-    from model.predictor import GamePredictor
-    predictor = GamePredictor()
+def save_events(events: list, date_str: str, api_key_hint: str,
+                predictor=None, starters: dict = None):
+    """Parse events and save odds + per-model predictions to the DB."""
+    if predictor is None:
+        from model.predictor import MultiPredictor
+        predictor = MultiPredictor()
+    if starters is None:
+        starters = {}
 
     for event in events:
-        # Only save events that actually fall on this date
         game_date = event.get("commence_time", "")[:10]
         if game_date != date_str:
             continue
@@ -137,19 +140,45 @@ def save_events(events: list, date_str: str, api_key_hint: str):
         odds_by_book = _parse_bookmaker_odds(event.get("bookmakers", []))
         best = _best_odds(odds_by_book)
 
-        game = {
-            "id": event["id"],
-            "home_team": event["home_team"],
-            "away_team": event["away_team"],
-            "commence_time": event["commence_time"],
-            "odds": odds_by_book,
-            "best_odds": best,
-        }
-        prediction = predictor.predict(event["home_team"], event["away_team"])
+        home_team = event["home_team"]
+        away_team = event["away_team"]
 
-        # Compute value alerts inline
-        alerts = _value_alerts(event["home_team"], event["away_team"], best, prediction)
-        db.upsert_prediction(game, prediction, alerts)
+        game = {
+            "id":           event["id"],
+            "home_team":    home_team,
+            "away_team":    away_team,
+            "commence_time": event["commence_time"],
+            "odds":         odds_by_book,
+            "best_odds":    best,
+        }
+
+        # Find probable starters for this game (if available)
+        home_pitcher = away_pitcher = None
+        for matchup_data in starters.values():
+            h = matchup_data.get("home_team", "")
+            a = matchup_data.get("away_team", "")
+            if (h[:3].upper() == home_team[:3].upper() or
+                    a[:3].upper() == away_team[:3].upper()):
+                home_pitcher = matchup_data.get("home_pitcher")
+                away_pitcher = matchup_data.get("away_pitcher")
+                break
+
+        all_predictions = predictor.predict_all(
+            home_team, away_team,
+            home_pitcher=home_pitcher,
+            away_pitcher=away_pitcher,
+        )
+
+        # Store per-model predictions
+        for model_name, pred in all_predictions.items():
+            alerts   = _value_alerts(home_team, away_team, best, pred)
+            is_value = int(bool(alerts))
+            db.upsert_model_prediction(game["id"], model_name, pred, is_value)
+
+        # Game record (primary model for backward-compat columns)
+        primary_pred   = predictor.primary_prediction(all_predictions)
+        primary_alerts = _value_alerts(home_team, away_team, best, primary_pred)
+        db.upsert_prediction(game, primary_pred, primary_alerts)
 
 
 def _value_alerts(home_team, away_team, best_odds, prediction):
@@ -203,11 +232,24 @@ def run(start: date, end: date, api_key: str, dry_run: bool):
     print()
     total_credits_used = 0
 
+    from model.predictor import MultiPredictor
+    predictor = MultiPredictor()
+    print(f"Models loaded: {predictor.models() or ['none — using baseline']}")
+
     for i, d in enumerate(to_fetch):
         date_str = d.isoformat()
         try:
             events, used, remaining = fetch_historical(date_str, api_key)
-            save_events(events, date_str, api_key)
+
+            # Fetch probable starters for the date (best-effort; v2 pitcher features)
+            starters = {}
+            try:
+                from model.pitcher_features import get_starters_for_date
+                starters = get_starters_for_date(date_str)
+            except Exception:
+                pass
+
+            save_events(events, date_str, api_key, predictor=predictor, starters=starters)
             _log_fetch(date_str, len(events), used, remaining)
             total_credits_used += used
             print(f"[{i+1}/{len(to_fetch)}] {date_str}  {len(events)} events  "
