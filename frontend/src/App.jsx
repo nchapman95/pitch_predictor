@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import GameCard from './components/GameCard'
+import PerformancePanel from './components/PerformancePanel'
 import './App.css'
 
 export default function App() {
@@ -61,6 +62,8 @@ export default function App() {
       </header>
 
       <main className="main">
+        <PerformancePanel />
+
         {error && (
           <div className="error-banner">
             {error.includes('502') || error.includes('Odds API')
