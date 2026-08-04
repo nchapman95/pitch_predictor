@@ -28,6 +28,8 @@ _PREDICTIONS_COLS = """
     is_value_pick   INTEGER DEFAULT 0,
     home_best_odds  INTEGER,
     away_best_odds  INTEGER,
+    home_implied_prob REAL,
+    away_implied_prob REAL,
     odds_json       TEXT,
     model_used      TEXT,
     created_at      TEXT,
@@ -63,12 +65,44 @@ def init_db():
         cx.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_game ON odds_snapshots(game_id)")
         cx.execute("CREATE INDEX IF NOT EXISTS idx_mp_game ON model_predictions(game_id)")
         _add_column_if_missing(cx, "predictions", "odds_json", "TEXT")
+        _add_column_if_missing(cx, "predictions", "home_implied_prob", "REAL")
+        _add_column_if_missing(cx, "predictions", "away_implied_prob", "REAL")
+        _backfill_implied_probs(cx)
+
+
+def _american_to_implied(odds):
+    """Convert American moneyline odds to implied win probability."""
+    if odds is None:
+        return None
+    if odds < 0:
+        return round(abs(odds) / (abs(odds) + 100), 6)
+    return round(100 / (odds + 100), 6)
 
 
 def _add_column_if_missing(cx, table, column, col_type):
     cols = [r[1] for r in cx.execute(f"PRAGMA table_info({table})").fetchall()]
     if column not in cols:
         cx.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+
+
+def _backfill_implied_probs(cx):
+    """One-time migration: populate implied probs for rows that have odds but no prob yet."""
+    rows = cx.execute("""
+        SELECT id, home_best_odds, away_best_odds
+        FROM predictions
+        WHERE home_implied_prob IS NULL
+          AND (home_best_odds IS NOT NULL OR away_best_odds IS NOT NULL)
+    """).fetchall()
+    for row in rows:
+        cx.execute("""
+            UPDATE predictions
+            SET home_implied_prob = ?, away_implied_prob = ?
+            WHERE id = ?
+        """, (
+            _american_to_implied(row[1]),
+            _american_to_implied(row[2]),
+            row[0],
+        ))
 
 
 @contextmanager
@@ -96,13 +130,18 @@ def upsert_prediction(game: dict, prediction: dict, value_alerts: list):
     now       = datetime.now(timezone.utc).isoformat()
     odds_json = json.dumps(odds)
 
+    home_odds = best.get(home_team)
+    away_odds = best.get(away_team)
+
     with _conn() as cx:
         cx.execute("""
             INSERT INTO predictions
               (id, game_date, home_team, away_team, predicted_winner,
                home_win_prob, away_win_prob, is_value_pick,
-               home_best_odds, away_best_odds, odds_json, model_used, created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+               home_best_odds, away_best_odds,
+               home_implied_prob, away_implied_prob,
+               odds_json, model_used, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(id) DO NOTHING
         """, (
             game["id"], game_date, home_team, away_team,
@@ -110,7 +149,9 @@ def upsert_prediction(game: dict, prediction: dict, value_alerts: list):
             prediction.get("home_win_prob"),
             prediction.get("away_win_prob"),
             is_value,
-            best.get(home_team), best.get(away_team),
+            home_odds, away_odds,
+            _american_to_implied(home_odds),
+            _american_to_implied(away_odds),
             odds_json,
             prediction.get("model_used"),
             now,
