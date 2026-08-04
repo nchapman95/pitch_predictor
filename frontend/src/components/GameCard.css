@@ -39,6 +39,16 @@
   letter-spacing: 0.5px;
 }
 
+.pitcher-name {
+  font-size: 12px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.pitcher-name.unknown {
+  color: #555;
+}
+
 .predicted-winner .team-name {
   color: var(--green);
 }

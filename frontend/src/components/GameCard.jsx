@@ -67,12 +67,22 @@ function OddsRow({ bookmaker, homeTeam, awayTeam, prices }) {
   )
 }
 
+function PitcherBadge({ name }) {
+  if (!name) return <span className="pitcher-name unknown">TBD</span>
+  const last = name.split(' ').slice(1).join(' ') || name
+  return <span className="pitcher-name">{last}</span>
+}
+
 export default function GameCard({ game }) {
-  const { home_team, away_team, commence_time, odds, best_odds, prediction } = game
+  const {
+    home_team, away_team, commence_time, odds, best_odds, prediction,
+    home_pitcher, away_pitcher,
+  } = game
   const bookmakers = Object.keys(odds || {})
   const winner = prediction?.predicted_winner
   const confidence = prediction?.confidence
   const valueAlerts = getValueAlerts(home_team, away_team, best_odds, prediction)
+  const hasPitchers = home_pitcher || away_pitcher
 
   return (
     <div className="game-card">
@@ -81,6 +91,7 @@ export default function GameCard({ game }) {
         <div className={`team ${winner === away_team ? 'predicted-winner' : ''}`}>
           <span className="team-name">{away_team}</span>
           <span className="team-role">Away</span>
+          {hasPitchers && <PitcherBadge name={away_pitcher} />}
         </div>
         <div className="vs-block">
           <span className="vs">@</span>
@@ -89,6 +100,7 @@ export default function GameCard({ game }) {
         <div className={`team team-right ${winner === home_team ? 'predicted-winner' : ''}`}>
           <span className="team-name">{home_team}</span>
           <span className="team-role">Home</span>
+          {hasPitchers && <PitcherBadge name={home_pitcher} />}
         </div>
       </div>
 
