@@ -2,6 +2,9 @@ import os
 import sys
 from fastapi import FastAPI, HTTPException, Query
 from datetime import date as Date, datetime, timezone
+from zoneinfo import ZoneInfo
+
+_ET = ZoneInfo("America/New_York")
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from odds_client import OddsClient
@@ -89,7 +92,7 @@ def get_games(date: Date = Query(default=None)):
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Odds API error: {e}")
 
-    date_str = (date or datetime.now(timezone.utc).date()).isoformat()
+    date_str = (date or datetime.now(tz=_ET).date()).isoformat()
     starters = _get_starters(date_str)
 
     response = []

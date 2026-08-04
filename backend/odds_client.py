@@ -1,6 +1,10 @@
 import requests
 from datetime import datetime, timezone, date as Date
 from typing import Any
+from zoneinfo import ZoneInfo
+
+# All MLB game times are defined in US Eastern time
+_ET = ZoneInfo("America/New_York")
 
 ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 SPORT = "baseball_mlb"
@@ -15,7 +19,7 @@ class OddsClient:
         self._cache: dict[str, Any] = {}
 
     def _fetch(self, date: Date = None) -> list:
-        today = datetime.now(timezone.utc).date()
+        today = datetime.now(tz=_ET).date()   # Eastern date, not UTC
         target = date or today
         params = {
             "apiKey": self.api_key,
@@ -46,13 +50,14 @@ class OddsClient:
         return self._cache
 
     def get_todays_mlb_games(self, date: Date = None) -> list[dict]:
-        target_date = date or datetime.now(timezone.utc).date()
+        target_date = date or datetime.now(tz=_ET).date()   # Eastern "today"
         events = self._fetch(date=date)
         games = []
 
         for event in events:
             game_time = datetime.fromisoformat(event["commence_time"].replace("Z", "+00:00"))
-            if game_time.date() != target_date:
+            # Compare in Eastern time — late West Coast games can cross midnight UTC
+            if game_time.astimezone(_ET).date() != target_date:
                 continue
 
             odds_by_book = _parse_bookmaker_odds(event.get("bookmakers", []))
