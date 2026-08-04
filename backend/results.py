@@ -1,10 +1,18 @@
 """
 Fetch final MLB game scores from the free MLB Stats API and resolve predictions.
 No API key required.
+
+Usage (CLI):
+    python results.py                          # resolve all pending past games
+    python results.py --start 2026-08-01       # resolve from a specific date
+    python results.py --start 2026-08-01 --end 2026-08-31
 """
 
+import argparse
 import requests
-from datetime import datetime, timezone
+import sys
+import time
+from datetime import datetime, date, timedelta, timezone
 
 MLB_API = "https://statsapi.mlb.com/api/v1"
 
@@ -89,7 +97,6 @@ def resolve_pending(db):
     if not unresolved:
         return 0
 
-    # Group by date for efficient API calls
     by_date: dict[str, list] = {}
     for row in unresolved:
         by_date.setdefault(row["game_date"], []).append(row)
@@ -108,3 +115,61 @@ def resolve_pending(db):
                 resolved_count += 1
 
     return resolved_count
+
+
+def resolve_range(db, start: str, end: str) -> int:
+    """
+    Resolve all games (resolved or not) in a date range.
+    Useful for fixing missed results or re-checking a specific month.
+    """
+    con_rows = db.get_unresolved(before_date="9999-12-31")   # all unresolved ever
+    in_range = [r for r in con_rows if start <= r["game_date"] <= end]
+
+    by_date: dict[str, list] = {}
+    for row in in_range:
+        by_date.setdefault(row["game_date"], []).append(row)
+
+    resolved_count = 0
+    dates = sorted(by_date)
+    for i, date_str in enumerate(dates):
+        finals = get_final_results(date_str)
+        rows   = by_date[date_str]
+        day_resolved = 0
+        for row in rows:
+            match = next(
+                (f for f in finals
+                 if f["home_team"] == row["home_team"] and f["away_team"] == row["away_team"]),
+                None,
+            )
+            if match:
+                db.resolve_game(row["id"], match["winner"])
+                resolved_count += 1
+                day_resolved += 1
+        print(f"  {date_str}  {day_resolved}/{len(rows)} resolved")
+        if i < len(dates) - 1:
+            time.sleep(0.2)
+
+    return resolved_count
+
+
+if __name__ == "__main__":
+    import os
+    sys.path.insert(0, os.path.dirname(__file__))
+    import db
+
+    parser = argparse.ArgumentParser(description="Resolve MLB game results from the MLB Stats API")
+    parser.add_argument("--start", default=None, help="Start date YYYY-MM-DD (default: all pending)")
+    parser.add_argument("--end",   default=None, help="End date YYYY-MM-DD (default: yesterday)")
+    args = parser.parse_args()
+
+    db.init_db()
+
+    if args.start:
+        end = args.end or (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
+        print(f"Resolving {args.start} → {end} ...")
+        n = resolve_range(db, args.start, end)
+    else:
+        print("Resolving all pending past games ...")
+        n = resolve_pending(db)
+
+    print(f"\nDone — {n} game(s) resolved.")
