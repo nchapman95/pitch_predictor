@@ -253,10 +253,21 @@ def get_performance_stats() -> dict:
     # Count unique resolved games
     resolved_games = len({r["game_id"] for r in all_rows})
 
+    # Normalize legacy model_used strings to standard keys ("v1", "v2")
+    _LEGACY = {
+        "ML Model v1":           "v1",
+        "ML Model v1 (rolling)": "v1",
+        "ML Model v1 (bayesian)":"v1",
+        "ML Model v2 (pitcher)": "v2",
+        "ML Model":              "v1",
+    }
+
     # Group by model
     by_model_rows: dict[str, list] = {}
     for r in all_rows:
-        by_model_rows.setdefault(r["model_name"] or "unknown", []).append(r)
+        raw  = r["model_name"] or "unknown"
+        key  = _LEGACY.get(raw, raw)
+        by_model_rows.setdefault(key, []).append(r)
 
     by_model = {
         model: _model_stats(rows)
