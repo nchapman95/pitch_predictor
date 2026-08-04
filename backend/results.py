@@ -37,7 +37,7 @@ _NAME_MAP = {
     "Minnesota Twins": "Minnesota Twins",
     "New York Mets": "New York Mets",
     "New York Yankees": "New York Yankees",
-    "Oakland Athletics": "Oakland Athletics",
+    "Oakland Athletics": "Athletics",
     "Philadelphia Phillies": "Philadelphia Phillies",
     "Pittsburgh Pirates": "Pittsburgh Pirates",
     "San Diego Padres": "San Diego Padres",
